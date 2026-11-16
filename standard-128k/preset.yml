@@ -1,0 +1,3 @@
+name: 标准模式（128 KB 指令预算）
+description: 与「标准模式」逐字节相同，只把工作区指令的字节预算从出厂的 64 KB 抬到 128 KB，让较长的 AGENTS.md 完整送达而不被静默截尾。工具集与 persona 都不变。
+order: 2

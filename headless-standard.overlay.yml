@@ -1,0 +1,17 @@
+# CONTROL overlay for headless-verify.overlay.yml.
+#
+# Identical to the verify overlay except `default: standard` — a preset that
+# ships with the deployment and is known loadable. This isolates one variable:
+# if `standard` changes the composed persona but `verify` does not, then the
+# fault is in OUR preset. If neither changes it, the headless app simply does
+# not consult the preset roster, and no verdict about `verify` can be read from
+# a headless run at all.
+#
+# Usage:
+#   dsh --profile headless --patch D:\deepseek\.agent-presets\headless-standard.overlay.yml "..."
+
+- insert:
+    - id: agent-presets
+      name: '@deepseek-ai/dsh-agent-presets'
+      config:
+        default: standard

@@ -1,0 +1,25 @@
+# Overlay: mount the agent-preset roster in the `headless` profile so the
+# one-shot CLI run composes from OUR locally authored `verify` preset.
+#
+# Why this exists: `@deepseek-ai/dsh-agent-presets` is mounted by `dsh-web-app`,
+# not by `dsh-headless`. But preset discovery also reads the USER root
+# (`$DSH_HOME/.agent-presets`, `includeUserRoot: true` by default), so any
+# profile that mounts the roster sees `verify`. The launcher's `--patch` flag
+# applies this overlay after the profile layer, which means NO new profile and
+# NO `dsh plugin add` are needed.
+#
+# `default: verify` is what makes the headless one-shot session compose from our
+# preset instead of falling back to the host composition. A session names a
+# preset explicitly or through this configured default.
+#
+# Usage:
+#   dsh --profile headless --patch D:\deepseek\.agent-presets\headless-verify.overlay.yml "your task"
+#
+# Note: this is a PROBE overlay, not a shipped capability. It is deliberately an
+# overlay rather than a profile edit so nothing durable changes.
+
+- insert:
+    - id: agent-presets
+      name: '@deepseek-ai/dsh-agent-presets'
+      config:
+        default: verify

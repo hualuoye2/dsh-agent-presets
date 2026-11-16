@@ -1,0 +1,34 @@
+# Overlay: point the WEB-plane agent-preset roster's deployment default at OUR
+# `verify` preset, so a session created on this instance composes from `verify`
+# for real.
+#
+# Why the Web plane specifically: this is the ONLY plane where the preset roster
+# actually decides a session's composition. `dsh-web-app` disables the
+# host-plane agent rows and lets each session mount a preset instead — which is
+# why `dsh --profile headless` cannot validate a preset (three-way control in
+# AGENTS.md section 1.6: the persona is identical whether or not the roster is
+# mounted).
+#
+# ⚠️ THIS MUST OVERRIDE, NOT INSERT.
+# `dsh-web-app/cordis.patch.yml` already inserts a row with `id: agent-presets`
+# (config `default: standard`). An `- insert:` overlay for the same id makes the
+# boot die outright:
+#
+#   dsh: plugin tree failed to load: failed to apply loader entry include
+#   (cordis:include): duplicate loader entry id: agent-presets
+#
+# The headless experiment used `insert` successfully only because nothing else
+# in that profile had claimed the id. In the Web plane the row exists, so the
+# patch is an id-targeted CONFIG OVERRIDE.
+#
+# Usage (separate port, never the live GUI's port; the GUI port is ephemeral
+# since DSH 0.2.1-rc.2 -- formerly 19387; no browser launch):
+#   dsh --profile web --patch D:\deepseek\.agent-presets\web-verify.overlay.yml --port 19399 --no-open
+#
+# This is a PROBE overlay. It changes nothing durable: no profile edit, no
+# settings write.
+
+- id: agent-presets
+  name: '@deepseek-ai/dsh-agent-presets'
+  config:
+    default: verify

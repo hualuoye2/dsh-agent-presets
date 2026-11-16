@@ -1,0 +1,275 @@
+# The `verify` agent preset: an independent verification agent, mounted once per
+# process.
+#
+# This is a LOCAL preset, authored as a surgical edit of the shipped `standard`
+# composition. Everything below is byte-identical to `standard` except:
+#
+#   1. the `persona` row carries the verifier's standing orders, and
+#   2. the whole `delegation` group is REMOVED.
+#
+# Why the delegation group is removed, and not merely discouraged in the persona:
+#
+#   * `subagent_fork` is seeded with the parent conversation, so a forked child
+#     inherits the author's reasoning — including the author's WRONG criterion.
+#     That is precisely the failure mode this preset exists to prevent, and it is
+#     a real, recorded failure in this workspace: an audit subagent's injected
+#     fault silently did not take effect, and it reported seven findings of which
+#     none came from the injection.
+#   * A verifier that re-delegates has not made the verification independent; it
+#     has only moved the blind spot somewhere the caller cannot inspect.
+#   * This workspace has a documented FALSE performance failure caused by
+#     concurrent load (a serial 76-86 ms measurement read as 224 ms). A verifier
+#     that can fan out will eventually do so, and will mis-measure.
+#
+# What is deliberately PRESERVED from `standard`, and why the removals are safe:
+# the removed rows are the delegation TOOLS plus the `workflowEngine` group that
+# fed them. The `subagents` registry, the spawn/fork backends, the sandbox and
+# approval stack, persistence and the model route all stay in the HOST plane, so
+# removing these rows withdraws only tool visibility. Nothing left in this file
+# consumes `workflowEngine`, so no consumer is stranded outside a provider's
+# realm. `tool-fs` stays even though verification should not mutate the artifact:
+# the verifier MUST be able to write, because fault injection means deliberately
+# creating a broken input. Its confinement is a persona rule plus the host
+# sandbox, not a missing tool.
+#
+# The plane/realm rules from `standard` still apply verbatim:
+#
+# A service row here MUST sit inside a group carrying an `isolate` realm.
+# Without one it publishes into the root realm, where it is process-global —
+# another preset publishing the same name collides, and a host reader would
+# resolve one preset's instance for every session; `dsh-agent-presets` rejects
+# that at mount. `true` means an entry-local realm: this standing mount's own
+# private instance, apart from every other preset's.
+
+# ── identity ────────────────────────────────────────────────────────────────
+
+# The verifier's standing orders. This is the part that cannot be made optional:
+# a skill is load-on-demand, so anything that must ALWAYS hold has to live in the
+# persona. Workspace facts are deliberately NOT repeated here — AGENTS.md is
+# 25 KB against this preset's 64 KB `maxBytes`, so it arrives in full through the
+# `agent-instructions` row below.
+- id: persona
+  name: '@deepseek-ai/dsh-persona'
+  config:
+    prefix: >-
+      You are an independent verification agent powered by the {{model}} model.
+
+      You did not write the artifact you are testing, and you must not assume it
+      is correct. Your job is to decide whether a claim is TRUE — not to make it
+      true, and not to make the artifact better. A defect you find and report is a
+      success; a pass you cannot justify with a command and a raw number is a
+      failure of your own work.
+
+      Assume your instrument is wrong before you assume the artifact is wrong.
+      Before you trust any checker, probe, assertion, or criterion — including one
+      you have just written — inject a fault that it must catch, and confirm with
+      your own eyes that it caught it. A checker that reports zero problems has
+      not been shown to work; it has only been shown to run. After injecting,
+      verify that the injection actually took effect: a copy that silently did not
+      change, or an edit that landed in the wrong file, will make a broken checker
+      look green.
+
+      Read the conclusion line an instrument prints, not the keywords it happens
+      to contain. Assertion text and error prose legitimately contain words like
+      FAIL and ERROR on a passing run. Quote the exact command you ran and the raw
+      number, line, or path it printed.
+
+      Run every performance or timing assertion serially, with nothing else
+      running. In this environment measured latency has more than doubled under
+      concurrent load and produced false failures.
+
+      Never delegate the verification onward. You are the last stop. This preset
+      mounts no subagent and no workflow tools on purpose: if a check looks like it
+      would benefit from parallelism, run it serially anyway, or report that you
+      could not run it.
+
+      Treat the workspace instruction file as binding, and when a project-specific
+      verification skill applies, load it and follow it — that is where the
+      acceptance criteria and the "do not change this back" list live.
+
+      Do not repair the artifact under test. Write only into scratch locations, and
+      for fault injection only, leaving the artifact exactly as you found it.
+
+      Report your findings in Chinese, with the command and the raw number behind
+      every judgement.
+
+- id: agent-instructions
+  name: '@deepseek-ai/dsh-agent-instructions'
+  config:
+    maxBytes: 65536
+
+# ── shell ───────────────────────────────────────────────────────────────────
+
+# `shell-env` stays in the HOST composition: `apps/cli/src/web.ts` injects it to
+# publish `DSH_WEB_URL`/`DSH_WEB_MODE`, and a host row that injects a service is
+# the criterion for host-plane ownership — injection resolves before any session
+# exists, so there is no agent to key by. Behind a preset realm those variables
+# never reached the model's shell at all. Both shell tools consume the host
+# registry from here; their executors (`bash-sandbox`/`pwsh-sandbox`) are
+# host-plane too.
+- id: tool-bash
+  name: '@deepseek-ai/dsh-tool-bash'
+  disabled: !!js process.platform === 'win32'
+
+- id: tool-pwsh
+  name: '@deepseek-ai/dsh-tool-pwsh'
+  disabled: !!js process.platform !== 'win32'
+
+# ── filesystem ──────────────────────────────────────────────────────────────
+
+# Both register into the host `tools` registry and provide nothing, so
+# they need no realm. The `fs` service and its policy stay in the host.
+- id: tool-fs
+  name: '@deepseek-ai/dsh-tool-fs'
+
+- id: tool-fs-search
+  name: '@deepseek-ai/dsh-tool-fs-search'
+  config:
+    sampleOverCapGlobResults: false
+
+# ── background jobs ────────────────────────────────────────────────────────
+
+# Only the model-facing controls. The task REGISTRY stays on the host plane:
+# its producers sit outside any realm this file could put it in — `tool-bash`
+# above resolves it with `ctx.get`, and an entry-local realm here is invisible
+# to every sibling row, so `run_in_background` would answer "background jobs
+# unavailable" while these controls sat in the catalog. The registry is keyed by
+# owning agent anyway, so one host instance serves every session. What a preset
+# chooses is whether its agent can collect and stop background work at all.
+#
+# Kept for the verifier even though its assertions must run serially: a Godot or
+# PyInstaller run takes minutes, and a verifier that cannot background one will
+# busy-wait on it. The serial rule is about not running OTHER load concurrently,
+# which is a persona rule, not a missing tool.
+- id: tool-jobs
+  name: '@deepseek-ai/dsh-tool-jobs'
+
+# ── skills ──────────────────────────────────────────────────────────────────
+
+# The skill REGISTRY lives in the host composition and is layered per scope:
+# these rows register into THIS preset's layer of it, so they need no realm.
+# `skill-filesystem` contributes local-root discovery for agents on this preset, and
+# `tool-skill` gives them the catalog and loader; the merged catalog also
+# carries whatever the deployment registered globally (repository plugins).
+#
+# This is how the verifier reaches the workspace's `verify-*` skills. They are NOT
+# copied into this preset: duplicating them would create a second copy that drifts
+# from the maintained originals.
+- id: skill-filesystem
+  name: '@deepseek-ai/dsh-skill-filesystem'
+
+- id: tool-skill
+  name: '@deepseek-ai/dsh-tool-skill'
+
+# ── goals ───────────────────────────────────────────────────────────────────
+
+# The goal service and session driver stay on the host plane, where the Gateway
+# can resolve them. The human command and model-facing tool register into this
+# preset's scoped layers.
+- id: command-goal
+  name: '@deepseek-ai/dsh-command-goal'
+
+- id: tool-goal
+  name: '@deepseek-ai/dsh-tool-goal'
+
+# ── plan mode ───────────────────────────────────────────────────────────────
+
+# Plan state is per-agent by nature, so an entry-local realm is not a
+# workaround here — it is the correct lifetime.
+- id: planning
+  name: cordis:group
+  group: true
+  isolate:
+    planMode: true
+  config:
+    - id: plan-mode
+      name: '@deepseek-ai/dsh-plan-mode'
+      config:
+        section: |
+              You are in plan mode. Stay in plan mode until exit_plan_mode succeeds or the user switches the session mode. Imperative language to implement changes means plan the implementation, not execute it. A user's conversational agreement — including an answer confirming something you asked — approves nothing and does not end plan mode; fold the confirmed decision into the plan and submit it through exit_plan_mode.
+
+              Explore first. Use non-mutating reads, searches, static analysis, and checks to ground the plan in the actual repository. Do not edit or write files, change configuration, run formatters or code generation that rewrites tracked files, commit, or otherwise carry out the plan. Prefer existing functions and patterns over new machinery.
+
+              The tool catalog stays the same across modes for request-cache stability. These plan-mode rules override any later tool description or guidance that suggests using mutation tools; those tools remain listed to keep the tool catalog unchanged. Do not use todo_write to track this planning phase: it tracks implementation after an approved plan, while the plan itself belongs in exit_plan_mode.
+
+              Resolve discoverable facts by inspection. Use ask_user_question only for user-owned choices or material ambiguity that inspection cannot answer. Do not ask the user where code lives or how current behavior works when you can find out.
+
+              Make the plan decision-complete: state the goal and success criteria; group implementation changes by subsystem; identify public API, schema, and data-flow changes; cover edge cases, failure modes, tests, acceptance criteria, and explicit assumptions. Keep it concise enough to review but detailed enough that another engineer can implement it without making design decisions.
+
+              When ready, call exit_plan_mode with the complete plan markdown, starting with a # title. Make exit_plan_mode the only and final tool call in that assistant response: it presents the plan for approval, and implementation begins only in a later step after approval. Do not paste the final plan as a plain reply or ask "should I proceed?" through prose or ask_user_question. If review rejects it, incorporate the feedback and present again. If the review channel is unavailable or aborted, stay in plan mode and ask the user to switch modes manually; do not proceed with implementation.
+
+# ── compaction ──────────────────────────────────────────────────────────────
+
+# `compaction-basic` reads `toolResultPrune` through `ctx.get`, so the pruner must
+# share this realm rather than sit outside it.
+#
+# `tokenMeter` is deliberately NOT in this realm: the meter stays on the HOST
+# plane, and the rows here resolve that one instance. It takes no configuration,
+# keys every fold by Session, and owns the context-meter projection units the
+# browser reads for every session — behind a realm those units would come and go
+# with whichever presets happen to be mounted. What a preset chooses is whether
+# its agent compacts at all, which is `compaction-basic` below.
+- id: compaction
+  name: cordis:group
+  group: true
+  isolate:
+    compaction: true
+    toolResultPruner: true
+  config:
+    - id: compaction-basic
+      name: '@deepseek-ai/dsh-compaction-basic'
+
+    - id: command-compact
+      name: '@deepseek-ai/dsh-command-compact'
+
+    - id: tool-result-pruner
+      name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+      config:
+        thresholdChars: 8192
+        headChars: 4096
+        tailChars: 1024
+
+# ── delegation and workflows: REMOVED ON PURPOSE ────────────────────────────
+#
+# `standard` mounts a `delegation` group here holding:
+#   tool-subagent-control, tool-subagent-control/list-agents, tool-subagent,
+#   tool-subagent-fork, the two disabled product rows (subagent_codex,
+#   subagent_claude_code), workflow-worker-thread, tool-workflow, tool-ralph.
+#
+# All of it is gone in this preset, so a session on `verify` has no subagent,
+# no subagent_fork, no workflow and no ralph. See the header for the three
+# reasons. To bring delegation back, copy `standard`'s delegation group verbatim
+# from the shipped composition — do not hand-write it, because the group carries
+# the `workflowEngine` isolate realm that its consumer rows depend on.
+#
+# If you ever re-enable a product provider (Codex / Claude Code), the provider is
+# a separate host Bundle, not a preset row:
+#
+#   dsh plugin --profile <name> add @deepseek-ai/dsh-subagent-codex
+#   dsh plugin --profile <name> add @deepseek-ai/dsh-subagent-claude-code
+#
+# NOTE for this deployment: on the `desktop` profile that CLI form is REFUSED —
+# `error: profile "desktop" is managed exclusively by the Electron application`.
+# Install those Bundles through the GUI plugin market instead, then restart the
+# Profile so the Host registers the provider, and only then un-disable the row.
+
+# ── remaining model-facing rows ─────────────────────────────────────────────
+
+- id: tool-ask-user
+  name: '@deepseek-ai/dsh-tool-ask-user'
+
+- id: tool-todo
+  name: '@deepseek-ai/dsh-tool-todo'
+  config:
+    allowParallelInProgress: true
+
+# The `web` service and its search provider stay in the host composition; only
+# the model-facing tool is per-session.
+- id: tool-web
+  name: '@deepseek-ai/dsh-tool-web'
+  config:
+    fetch: true
+    searchTimeoutMs: 60000
+
+- id: present
+  name: '@deepseek-ai/dsh-tool-present'
